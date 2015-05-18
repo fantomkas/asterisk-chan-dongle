@@ -1,0 +1,59 @@
+--- chan-dongle-master/pdu.c	2014-12-20 16:01:27.873471036 +0500
++++ chan-dongle-develop/pdu.c	2014-12-20 20:40:41.667206793 +0500
+@@ -182,6 +182,9 @@
+ */
+ 
+ #define NUMBER_TYPE_INTERNATIONAL		0x91
++#define NUMBER_TYPE_NATIONAL			0xC8
++#define NUMBER_TYPE_ALPHANUMERIC		0xD0
++
+ 
+ /* Message Type Indicator Parameter */
+ #define PDUTYPE_MTI_SHIFT			0
+@@ -229,6 +232,7 @@
+ 
+ #define PDU_PID_SMS				0x00		/* bit5 No interworking, but SME-to-SME protocol = SMS */
+ #define PDU_PID_EMAIL				0x32		/* bit5 Telematic interworking, bits 4..0 0x 12  = email */
++#define PDU_PID_SMS_REPLACE_MASK		0x40		/* bit7 Replace Short Message function activated (TP-PID = 0x41 to 0x47) */
+ 
+ /* DCS */
+ /*   bits 1..0 Class */
+@@ -442,9 +446,10 @@
+ #/* reverse of pdu_store_number() */
+ static int pdu_parse_number(char ** pdu, size_t * pdu_length, unsigned digits, int * toa, char * number, size_t num_len)
+ {
++	const char * begin;
+ 	if(num_len < digits + 1)
+ 		return -ENOMEM;
+-
++	begin = *pdu;
+ 	*toa = pdu_parse_byte(pdu, pdu_length);
+ 	if(*toa >= 0)
+ 	{
+@@ -457,6 +462,14 @@
+ 
+ 			if(*toa == NUMBER_TYPE_INTERNATIONAL)
+ 				*number++ = '+';
++			// BEGIN oioki proposed patch 2013-07-24
++			if(*toa == NUMBER_TYPE_ALPHANUMERIC)
++			{
++				for(; digits > 0; digits --, *pdu += 1, *pdu_length -= 1)
++					*number++ = pdu[0][0];
++				return *pdu - begin;
++			}
++			// END oioki proposed patch 2013-07-24
+ 
+ 			for(x = 0; x < digits; x++) {
+ 				digit = pdu_code2digit(pdu[0][x ^ 1]);
+@@ -700,9 +713,11 @@
+ 					{
+ 						int pid = pdu_parse_byte(pdu, &pdu_length);
+ 						*oa_enc = STR_ENCODING_7BIT;
++						if (oa_toa==NUMBER_TYPE_ALPHANUMERIC)  *oa_enc = STR_ENCODING_7BIT_HEX_PAD_0;  //  alphanumeric patch
+ 						if(pid >= 0)
+ 						{
+ 						   /* TODO: support other types of messages */
++//  shabbir    if( (pid == PDU_PID_SMS) || (pid & PDU_PID_SMS_REPLACE_MASK) )
+ 						   if(pid == PDU_PID_SMS || (pid >= 0x41 && pid <= 0x47))
+ 						   {
+ 							int dcs = pdu_parse_byte(pdu, &pdu_length);

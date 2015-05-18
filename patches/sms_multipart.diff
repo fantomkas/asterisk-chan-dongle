@@ -1,0 +1,744 @@
+Index: at_command.c
+===================================================================
+--- at_command.c	(revision 42)
++++ at_command.c	(working copy)
+@@ -418,7 +418,7 @@
+ 	length = STRLEN(cmd);
+ 
+ 	if (pvt->cusd_use_7bit_encoding)
+-		cusd_encoding = STR_ENCODING_7BIT_HEX;
++		cusd_encoding = STR_ENCODING_7BIT_HEX_PAD_0;
+ 	else if (pvt->use_ucs2_encoding)
+ 		cusd_encoding = STR_ENCODING_UCS2_HEX;
+ 	else
+Index: at_response.c
+===================================================================
+--- at_response.c	(revision 42)
++++ at_response.c	(working copy)
+@@ -1345,7 +1345,7 @@
+ 
+ 	// FIXME: strictly check USSD encoding and detect encoding
+ 	if ((dcs == 0 || dcs == 15) && !pvt->cusd_use_ucs2_decoding)
+-		ussd_encoding = STR_ENCODING_7BIT_HEX;
++		ussd_encoding = STR_ENCODING_7BIT_HEX_PAD_0;
+ 	else
+ 		ussd_encoding = STR_ENCODING_UCS2_HEX;
+ 	res = str_recode (RECODE_DECODE, ussd_encoding, cusd, strlen (cusd), cusd_utf8_str, sizeof (cusd_utf8_str));
+Index: char_conv.c
+===================================================================
+--- char_conv.c	(revision 42)
++++ char_conv.c	(working copy)
+@@ -159,98 +159,184 @@
+ 	return res;
+ }
+ 
+-static ssize_t char_to_hexstr_7bit (const char* in, size_t in_length, char* out, size_t out_size)
++static ssize_t char_to_hexstr_7bit_padded(const char* in, size_t in_length, char* out,
++    size_t out_size, unsigned out_padding)
+ {
+-	size_t		i;
+-	size_t		x = 0;
+-	size_t		s;
+-	unsigned char	c;
+-	unsigned char	b;
+-	char	buf[] = { 0x0, 0x0, 0x0 };
++	size_t i;
++	size_t x;
++	char buf[4];
++	unsigned value = 0;
+ 
+-	x = (in_length - in_length / 8) * 2;
+-	if (out_size - 1 < x)
+-	{
++	/* compute number of bytes we need for the final string, rounded up */
++	x = ((out_padding + (7 * in_length) + 7) / 8);
++	/* compute number of hex characters we need for the final string */
++	x = (2 * x) + 1 /* terminating zero */;
++
++	/* check that the buffer is not too small */
++	if (x > out_size)
+ 		return -1;
+-	}
+ 
+-	if(in_length > 0)
+-	{
+-		in_length--;
+-		for (i = 0, x = 0, s = 0; i < in_length; i++)
+-		{
+-			if (s == 7)
+-			{
+-				s = 0;
+-				continue;
+-			}
+-
+-			c = in[i] >> s;
+-			b = in[i + 1] << (7 - s);
+-			c = c | b;
+-			s++;
+-
+-			snprintf (buf, sizeof(buf), "%.2X", c);
+-
+-			memcpy (out + x, buf, 2);
+-			x = x + 2;
+-		}
+-
+-		c = in[i] >> s;
+-		snprintf (buf, sizeof(buf), "%.2X", c);
++	for (x = i = 0; i != in_length; i++) {
++		value |= (in[i] & 0x7F) << out_padding;
++		out_padding += 7;
++		if (out_padding < 8)
++			continue;
++		/* output one byte in hex */
++		snprintf (buf, sizeof(buf), "%02X", value & 0xFF);
+ 		memcpy (out + x, buf, 2);
+ 		x = x + 2;
++		value >>= 8;
++		out_padding -= 8;
+ 	}
++	if (out_padding != 0) {
++		snprintf (buf, sizeof(buf), "%02X", value & 0xFF);
++		memcpy (out + x, buf, 2);
++		x = x + 2;
++	}
++	/* zero terminate final string */
+ 	out[x] = '\0';
+ 
++	/* return total string length, excluding terminating zero */
+ 	return x;
+ }
+ 
+-static ssize_t hexstr_7bit_to_char (const char* in, size_t in_length, char* out, size_t out_size)
++static ssize_t char_to_hexstr_7bit_pad_0(const char* in, size_t in_length, char* out,
++    size_t out_size)
+ {
+-	size_t		i;
+-	size_t		x;
+-	size_t		s;
+-	int		hexval;
+-	unsigned char	c;
+-	unsigned char	b;
+-	char	buf[] = { 0x0, 0x0, 0x0 };
++	return char_to_hexstr_7bit_padded(in, in_length, out, out_size, 0);
++}
+ 
+-	in_length = in_length / 2;
+-	x = in_length + in_length / 7;
+-	if (out_size - 1 < x)
+-	{
+-		return -1;
++static ssize_t char_to_hexstr_7bit_pad_1(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return char_to_hexstr_7bit_padded(in, in_length, out, out_size, 1);
++}
++
++static ssize_t char_to_hexstr_7bit_pad_2(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return char_to_hexstr_7bit_padded(in, in_length, out, out_size, 2);
++}
++
++static ssize_t char_to_hexstr_7bit_pad_3(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return char_to_hexstr_7bit_padded(in, in_length, out, out_size, 3);
++}
++
++static ssize_t char_to_hexstr_7bit_pad_4(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return char_to_hexstr_7bit_padded(in, in_length, out, out_size, 4);
++}
++
++static ssize_t char_to_hexstr_7bit_pad_5(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return char_to_hexstr_7bit_padded(in, in_length, out, out_size, 5);
++}
++
++static ssize_t char_to_hexstr_7bit_pad_6(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return char_to_hexstr_7bit_padded(in, in_length, out, out_size, 6);
++}
++
++static ssize_t hexstr_7bit_to_char_padded(const char* in, size_t in_length, char* out,
++    size_t out_size, unsigned in_padding)
++{
++	size_t i;
++	size_t x;
++	char buf[4];
++	unsigned value = 0;
++	unsigned hexval;
++
++	/* compute number of bytes */
++	in_length /= 2;
++
++	/* check if string is empty */
++	if (in_length == 0) {
++		out[0] = '\0';
++		return (0);
+ 	}
+ 
+-	for (i = 0, x = 0, s = 1, b = 0; i < in_length; i++)
+-	{
++	/* compute number of characters */
++	x = (((in_length * 8) - in_padding) / 7) + 1 /* terminating zero */;
++
++	/* check if final string fits within buffer */
++	if (x > out_size)
++		return -1;
++
++	/* account for the bit padding */
++	in_padding = 7 - in_padding;
++
++	/* clear temporary buffer */
++	memset(buf, 0, sizeof(buf));
++
++	/* parse the hexstring */
++	for (x = i = 0; i != in_length; i++) {
+ 		memcpy (buf, in + i * 2, 2);
+ 		if (sscanf (buf, "%x", &hexval) != 1)
+-		{
+ 			return -1;
+-		}
++		value |= (hexval & 0xFF) << in_padding;
++		in_padding += 8;
+ 
+-		c = ((unsigned char) hexval) << s;
+-		c = (c >> 1) | b;
+-		b = ((unsigned char) hexval) >> (8 - s);
+-
+-		out[x] = c;
+-		x++; s++;
+-
+-		if (s == 8)
+-		{
+-			out[x] = b;
+-			s = 1; b = 0;
+-			x++;
++		while (in_padding >= (2 * 7)) {
++			in_padding -= 7;
++			value >>= 7;
++			out[x++] = value & 0x7F;
+ 		}
+ 	}
+ 
++	/* zero terminate final string */
+ 	out[x] = '\0';
+ 
++	/* return total string length, excluding terminating zero */
+ 	return x;
+ }
+ 
++static ssize_t hexstr_7bit_to_char_pad_0(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return  hexstr_7bit_to_char_padded(in, in_length, out, out_size, 0);
++}
++
++static ssize_t hexstr_7bit_to_char_pad_1(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return  hexstr_7bit_to_char_padded(in, in_length, out, out_size, 1);
++}
++
++static ssize_t hexstr_7bit_to_char_pad_2(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return  hexstr_7bit_to_char_padded(in, in_length, out, out_size, 2);
++}
++
++static ssize_t hexstr_7bit_to_char_pad_3(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return  hexstr_7bit_to_char_padded(in, in_length, out, out_size, 3);
++}
++
++static ssize_t hexstr_7bit_to_char_pad_4(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return  hexstr_7bit_to_char_padded(in, in_length, out, out_size, 4);
++}
++
++static ssize_t hexstr_7bit_to_char_pad_5(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return  hexstr_7bit_to_char_padded(in, in_length, out, out_size, 5);
++}
++
++static ssize_t hexstr_7bit_to_char_pad_6(const char* in, size_t in_length, char* out,
++    size_t out_size)
++{
++	return  hexstr_7bit_to_char_padded(in, in_length, out, out_size, 6);
++}
++
+ #/* */
+ ssize_t just_copy (const char* in, size_t in_length, char* out, size_t out_size)
+ {
+@@ -267,13 +353,18 @@
+ typedef ssize_t (*coder) (const char* in, size_t in_length, char* out, size_t out_size);
+ 
+ /* array in order of values RECODE_*  */
+-static const coder recoders[][2] =
++static const coder recoders[STR_ENCODING_UNKNOWN][2] =
+ {
+-/* in order of values STR_ENCODING_*  */
+-	{ hexstr_7bit_to_char, char_to_hexstr_7bit },		/* STR_ENCODING_7BIT_HEX */
+-	{ hexstr_to_8bitchars, chars8bit_to_hexstr },		/* STR_ENCODING_8BIT_HEX */
+-	{ hexstr_ucs2_to_utf8, utf8_to_hexstr_ucs2 },		/* STR_ENCODING_UCS2_HEX */
+-	{ just_copy, just_copy },				/* STR_ENCODING_7BIT */
++	[STR_ENCODING_7BIT_HEX_PAD_0] = { hexstr_7bit_to_char_pad_0, char_to_hexstr_7bit_pad_0 },
++	[STR_ENCODING_8BIT_HEX] = { hexstr_to_8bitchars, chars8bit_to_hexstr },
++	[STR_ENCODING_UCS2_HEX] = { hexstr_ucs2_to_utf8, utf8_to_hexstr_ucs2 },
++	[STR_ENCODING_7BIT] = { just_copy, just_copy },
++	[STR_ENCODING_7BIT_HEX_PAD_1] = { hexstr_7bit_to_char_pad_1, char_to_hexstr_7bit_pad_1 },
++	[STR_ENCODING_7BIT_HEX_PAD_2] = { hexstr_7bit_to_char_pad_2, char_to_hexstr_7bit_pad_2 },
++	[STR_ENCODING_7BIT_HEX_PAD_3] = { hexstr_7bit_to_char_pad_3, char_to_hexstr_7bit_pad_3 },
++	[STR_ENCODING_7BIT_HEX_PAD_4] = { hexstr_7bit_to_char_pad_4, char_to_hexstr_7bit_pad_4 },
++	[STR_ENCODING_7BIT_HEX_PAD_5] = { hexstr_7bit_to_char_pad_5, char_to_hexstr_7bit_pad_5 },
++	[STR_ENCODING_7BIT_HEX_PAD_6] = { hexstr_7bit_to_char_pad_6, char_to_hexstr_7bit_pad_6 },
+ };
+ 
+ #/* */
+@@ -293,7 +384,7 @@
+ 		for(; length; --length, ++in)
+ 			if(*in & 0x80)
+ 				return STR_ENCODING_UCS2_HEX;
+-		return STR_ENCODING_7BIT_HEX;
++		return STR_ENCODING_7BIT_HEX_PAD_0;
+ 	}
+ 	else
+ 	{
+@@ -304,7 +395,7 @@
+ 				return STR_ENCODING_7BIT;
+ 			}
+ 		}
+-		// TODO: STR_ENCODING_7BIT_HEX or STR_ENCODING_8BIT_HEX or STR_ENCODING_UCS2_HEX
++		// TODO: STR_ENCODING_7BIT_HEX_PAD_X or STR_ENCODING_8BIT_HEX or STR_ENCODING_UCS2_HEX
+ 	}
+ 
+ 	return STR_ENCODING_UNKNOWN;
+Index: char_conv.h
+===================================================================
+--- char_conv.h	(revision 42)
++++ char_conv.h	(working copy)
+@@ -11,11 +11,17 @@
+ /* for simplefy first 3 values same as in PDU DCS bits 3..2 */
+ /* NOTE: order is magic see definition of recoders in char_conv.c */
+ typedef enum {
+-	STR_ENCODING_7BIT_HEX		= 0,	/* 7bit encoding */
++	STR_ENCODING_7BIT_HEX_PAD_0 = 0,	/* 7bit encoding, 0 bits of padding */
+ 	STR_ENCODING_8BIT_HEX,			/* 8bit encoding */
+ 	STR_ENCODING_UCS2_HEX,			/* UCS-2 in hex like PDU */
+ /* TODO: check its really 7bit input from device */
+ 	STR_ENCODING_7BIT,			/* 7bit ASCII  no need recode to utf-8 */
++	STR_ENCODING_7BIT_HEX_PAD_1,		/* 7bit encoding, 1 bit of padding */
++	STR_ENCODING_7BIT_HEX_PAD_2,		/* 7bit encoding, 2 bits of padding */
++	STR_ENCODING_7BIT_HEX_PAD_3,		/* 7bit encoding, 3 bits padding */
++	STR_ENCODING_7BIT_HEX_PAD_4,		/* 7bit encoding, 4 bits padding */
++	STR_ENCODING_7BIT_HEX_PAD_5,		/* 7bit encoding, 5 bits padding */
++	STR_ENCODING_7BIT_HEX_PAD_6,		/* 7bit encoding, 6 bits padding */
+ //	STR_ENCODING_8BIT,			/* 8bit */
+ //	STR_ENCODING_UCS2,			/* UCS2 */
+ 	STR_ENCODING_UNKNOWN,			/* still unknown */
+Index: pdu.c
+===================================================================
+--- pdu.c	(revision 42)
++++ pdu.c	(working copy)
+@@ -257,8 +257,8 @@
+ 
+ /*   bit 5 */
+ #define PDU_DCS_COMPRESSION_SHIFT		5
+-#define PDU_DCS_NOT_COMPESSED			(0x00 << PDU_DCS_COMPRESSION_SHIFT)
+-#define PDU_DCS_COMPESSED			(0x01 << PDU_DCS_COMPRESSION_SHIFT)
++#define PDU_DCS_NOT_COMPRESSED			(0x00 << PDU_DCS_COMPRESSION_SHIFT)
++#define PDU_DCS_COMPRESSED			(0x01 << PDU_DCS_COMPRESSION_SHIFT)
+ #define PDU_DCS_COMPRESSION_MASK		(0x01 << PDU_DCS_COMPRESSION_SHIFT)
+ #define PDU_DCS_COMPRESSION(dcs)		((dcs) & PDU_DCS_COMPRESSION_MASK)
+ 
+@@ -347,8 +347,10 @@
+ 		case 'E':
+ 			code = 'C';
+ 			break;
++		case 'f':
+ 		case 'F':
+-			return 0;
++			code = 0;
++			break;
+ 		default:
+ 			return -1;
+ 	}
+@@ -440,37 +442,40 @@
+ #/* reverse of pdu_store_number() */
+ static int pdu_parse_number(char ** pdu, size_t * pdu_length, unsigned digits, int * toa, char * number, size_t num_len)
+ {
+-	const char * begin;
+-
+ 	if(num_len < digits + 1)
+ 		return -ENOMEM;
+ 
+-	begin = *pdu;
+ 	*toa = pdu_parse_byte(pdu, pdu_length);
+ 	if(*toa >= 0)
+ 	{
+-		unsigned syms = ROUND_UP2(digits);
+-		if(syms <= *pdu_length)
++		digits = ROUND_UP2(digits);
++
++		if(digits <= *pdu_length)
+ 		{
+-			char digit;
++			int digit = 0;
++			unsigned x;
++
+ 			if(*toa == NUMBER_TYPE_INTERNATIONAL)
+ 				*number++ = '+';
+-			for(; syms > 0; syms -= 2, *pdu += 2, *pdu_length -= 2)
+-			{
+-				digit = pdu_code2digit(pdu[0][1]);
+-				if(digit <= 0)
+-					return -1;
+-				*number++ = digit;
+ 
+-				digit = pdu_code2digit(pdu[0][0]);
+-				if(digit < 0 || (digit == 0 && (syms != 2 || (digits & 0x1) == 0)))
+-					return -1;
++			for(x = 0; x < digits; x++) {
++				digit = pdu_code2digit(pdu[0][x ^ 1]);
+ 
+-				*number++ = digit;
++				if(digit <= 0) {
++					for (; x < digits; x++)
++						number[x] = 0;
++					break;
++				}
++				number[x] = digit;
+ 			}
+-			if((digits & 0x1) == 0)
+-				*number = 0;
+-			return *pdu - begin;
++			/* always zero terminate */
++			number[digits] = 0;
++
++			*pdu += digits;
++			*pdu_length -= digits;
++
++			/* return parsed length */
++			return (digits + 2);
+ 		}
+ 	}
+ 
+@@ -515,7 +520,7 @@
+ static int check_encoding(const char* msg, unsigned length)
+ {
+ 	str_encoding_t possible_enc = get_encoding(RECODE_ENCODE, msg, length);
+-	if(possible_enc == STR_ENCODING_7BIT_HEX)
++	if(possible_enc == STR_ENCODING_7BIT_HEX_PAD_0)
+ 		return PDU_DCS_ALPABET_7BIT;
+ 	return PDU_DCS_ALPABET_UCS2;
+ }
+@@ -601,7 +606,7 @@
+ 	len += pdu_store_number(buffer + len, dst, dst_len);
+ 
+ 	/* forward TP-User-Data */
+-	data_len = str_recode(RECODE_ENCODE, dcs == PDU_DCS_ALPABET_UCS2 ? STR_ENCODING_UCS2_HEX : STR_ENCODING_7BIT_HEX, msg, msg_len, buffer + len + 8, length - len - 11);
++	data_len = str_recode(RECODE_ENCODE, dcs == PDU_DCS_ALPABET_UCS2 ? STR_ENCODING_UCS2_HEX : STR_ENCODING_7BIT_HEX_PAD_0, msg, msg_len, buffer + len + 8, length - len - 11);
+ 	if(data_len < 0)
+ 	{
+ 		return -EINVAL;
+@@ -644,7 +649,7 @@
+ 	switch(alpabet)
+ 	{
+ 		case (PDU_DCS_ALPABET_7BIT >> PDU_DCS_ALPABET_SHIFT):
+-			rv = STR_ENCODING_7BIT_HEX;
++			rv = STR_ENCODING_7BIT_HEX_PAD_0;
+ 			break;
+ 		case (PDU_DCS_ALPABET_8BIT >> PDU_DCS_ALPABET_SHIFT):
+ 			rv = STR_ENCODING_8BIT_HEX;
+@@ -673,9 +678,14 @@
+ 	int field_len = pdu_parse_sca(pdu, &pdu_length);
+ 	if(field_len > 0)
+ 	{
+-	    if(tpdu_length * 2 == pdu_length)
++	    if(tpdu_length * 2 <= pdu_length)
+ 	    {
+-		int pdu_type = pdu_parse_byte(pdu, &pdu_length);
++		int pdu_type;
++
++		/* update length, if any */
++		(*pdu)[pdu_length = (tpdu_length * 2)] = 0;
++
++		pdu_type = pdu_parse_byte(pdu, &pdu_length);
+ 		if(pdu_type >= 0)
+ 		{
+ 			/* TODO: also handle PDUTYPE_MTI_SMS_SUBMIT_REPORT and PDUTYPE_MTI_SMS_STATUS_REPORT */
+@@ -686,7 +696,7 @@
+ 				{
+ 					int oa_toa;
+ 					field_len = pdu_parse_number(pdu, &pdu_length, oa_digits, &oa_toa, oa, oa_len);
+-					if(field_len > 0)
++					if(field_len >= 0)
+ 					{
+ 						int pid = pdu_parse_byte(pdu, &pdu_length);
+ 						*oa_enc = STR_ENCODING_7BIT;
+@@ -693,7 +703,7 @@
+ 						if(pid >= 0)
+ 						{
+ 						   /* TODO: support other types of messages */
+-						   if(pid == PDU_PID_SMS)
++						   if(pid == PDU_PID_SMS || (pid >= 0x41 && pid <= 0x47))
+ 						   {
+ 							int dcs = pdu_parse_byte(pdu, &pdu_length);
+ 							if(dcs >= 0)
+@@ -701,7 +711,7 @@
+ 							    // TODO: support compression
+ 							    if( PDU_DCS_76(dcs) == PDU_DCS_76_00
+ 							    		&&
+-							    	PDU_DCS_COMPRESSION(dcs) == PDU_DCS_NOT_COMPESSED
++							    	PDU_DCS_COMPRESSION(dcs) == PDU_DCS_NOT_COMPRESSED
+ 							    		&&
+ 							    		(
+ 							    		PDU_DCS_ALPABET(dcs) == PDU_DCS_ALPABET_7BIT
+@@ -726,16 +736,70 @@
+ 										{
+ 											if(PDUTYPE_UDHI(pdu_type) == PDUTYPE_UDHI_HAS_HEADER)
+ 											{
+-												/* TODO: implement header parse */
+ 												int udhl = pdu_parse_byte(pdu, &pdu_length);
+ 												if(udhl >= 0)
+ 												{
++													/* adjust 7-bit padding */
++													if (*msg_enc == STR_ENCODING_7BIT_HEX_PAD_0) {
++														switch (6 - (udhl % 7)) {
++														case 1:
++															*msg_enc = STR_ENCODING_7BIT_HEX_PAD_1;
++															break;
++														case 2:
++															*msg_enc = STR_ENCODING_7BIT_HEX_PAD_2;
++															break;
++														case 3:
++															*msg_enc = STR_ENCODING_7BIT_HEX_PAD_3;
++															break;
++														case 4:
++															*msg_enc = STR_ENCODING_7BIT_HEX_PAD_4;
++															break;
++														case 5:
++															*msg_enc = STR_ENCODING_7BIT_HEX_PAD_5;
++															break;
++														case 6:
++															*msg_enc = STR_ENCODING_7BIT_HEX_PAD_6;
++															break;
++														default:
++															/* no change */
++															break;
++														}
++													}
++
+ 													/* NOTE: UDHL count octets no need calculation */
+ 													if(pdu_length >= (size_t)(udhl * 2))
+ 													{
+-														/* skip UDH */
+-														*pdu += udhl * 2;
+-														pdu_length -= udhl * 2;
++														while (udhl >= 2) {
++														  int iei_type;
++														  int iei_len;
++
++														  /* get type byte */
++														  iei_type = pdu_parse_byte(pdu, &pdu_length);
++
++														  /* get length byte */
++														  iei_len = pdu_parse_byte(pdu, &pdu_length);
++
++														  /* subtract bytes */
++														  udhl -= 2;
++
++														  /* skip data, if any */
++														  if (iei_len >= 0 && iei_len <= udhl) {
++														      /* skip rest of IEI */
++														      *pdu += iei_len * 2;
++														      pdu_length -= iei_len * 2;
++														      udhl -= iei_len;
++														  }
++														  else
++														  {
++														      err = "Invalid IEI len";
++														      break;
++														  }
++														}
++														if (err == NULL) {
++														  /* skip rest of UDH, if any */
++														  *pdu += udhl * 2;
++														  pdu_length -= udhl * 2;
++														}
+ 													}
+ 													else
+ 													{
+Index: test/parse.c
+===================================================================
+--- test/parse.c	(revision 42)
++++ test/parse.c	(working copy)
+@@ -9,6 +9,27 @@
+ int ok = 0;
+ int faults = 0;
+ 
++int test_strcmp(const char *pa, const char *pb)
++{
++	int retval;
++
++	if (pa == NULL)
++		pa = "";
++	if (pb == NULL)
++		pb = "";
++	retval = strcmp(pa,pb);
++
++	if (retval != 0) {
++		int x = 0;
++		while (pa[x] == pb[x] && pa[x] != 0) {
++			x++;
++		}
++		printf("String '%s' and '%s' differs at "
++		    "offset %d '%c' != '%c'\n", pa, pb, x, pa[x], pb[x]);
++	}
++	return (retval);
++}
++
+ #/* */
+ void test_parse_cnum()
+ {
+@@ -34,7 +55,7 @@
+ 		input = strdup(cases[idx].input);
+ 		fprintf(stderr, "%s(\"%s\")...", "at_parse_cnum", input);
+ 		res = at_parse_cnum(input);
+-		if(strcmp(res, cases[idx].result) == 0) {
++		if(test_strcmp(res, cases[idx].result) == 0) {
+ 			msg = "OK";
+ 			ok++;
+ 		} else {
+@@ -67,7 +88,7 @@
+ 		input = strdup(cases[idx].input);
+ 		fprintf(stderr, "%s(\"%s\")...", "at_parse_cops", input);
+ 		res = at_parse_cops(input);
+-		if(strcmp(res, cases[idx].result) == 0) {
++		if(test_strcmp(res, cases[idx].result) == 0) {
+ 			msg = "OK";
+ 			ok++;
+ 		} else {
+@@ -112,9 +133,9 @@
+ 			&&
+ 		   result.gsm_reg_status == cases[idx].result.gsm_reg_status
+ 			&&
+-		   strcmp(result.lac, cases[idx].result.lac) == 0
++		   test_strcmp(result.lac, cases[idx].result.lac) == 0
+ 			&&
+-		   strcmp(result.ci, cases[idx].result.ci) == 0
++		   test_strcmp(result.ci, cases[idx].result.ci) == 0
+ 			) {
+ 			msg = "OK";
+ 			ok++;
+@@ -203,7 +224,7 @@
+ 				"+11111111112",
+ 				STR_ENCODING_7BIT,
+ 				"B1582C168BC562B1984C2693C96432994C369BCD66B3D96C369BD168341A8D46A3D168B55AAD56ABD56AB59ACD66B3D96C369BCD76BBDD6EB7DBED76BBE170381C0E87C3E170B95C2E97CBE572B91C0C0683C16030180C",
+-				STR_ENCODING_7BIT_HEX
++				STR_ENCODING_7BIT_HEX_PAD_0
+ 			} 
+ 		},
+ 		{ "+CMGR: 0,,159\r\n07919740430900F3440B912222222220F20008012180004390218C0500030003010031003100310031003100310031003100310031003200320032003200320032003200320032003200330033003300330033003300330033003300330034003400340034003400340034003400340034003500350035003500350035003500350035003500360036003600360036003600360036003600360037003700370037003700370037",
+@@ -216,7 +237,26 @@
+ 				STR_ENCODING_UCS2_HEX
+ 			} 
+ 		},
+-
++		{ "+CMGR: 0,,158\r\n07916407970970F6400A912222222222000041903021825180A0050003000301A9E5391D14060941439015240409414290102404094142901024040941429010240409414290106405594142901564055941429012A40429AD4AABD22A7481AC56101264455A915624C80AB282AC20A1D06A0559415610D20A4282AC2024C80AB282AC202BC80AB282AC2E9012B4042D414A90D2055282942E90D20502819420254809528294",
++			{
++				NULL,
++				"A9E5391D14060941439015240409414290102404094142901024040941429010240409414290106405594142901564055941429012A40429AD4AABD22A7481AC56101264455A915624C80AB282AC20A1D06A0559415610D20A4282AC2024C80AB282AC202BC80AB282AC2E9012B4042D414A90D2055282942E90D20502819420254809528294",
++				"+2222222222",
++				STR_ENCODING_7BIT,
++				"A9E5391D14060941439015240409414290102404094142901024040941429010240409414290106405594142901564055941429012A40429AD4AABD22A7481AC56101264455A915624C80AB282AC20A1D06A0559415610D20A4282AC2024C80AB282AC202BC80AB282AC2E9012B4042D414A90D2055282942E90D20502819420254809528294",
++				STR_ENCODING_7BIT_HEX_PAD_1,
++			}
++		},
++		{ "+CMGR: 0,,55\r\n07912933035011804409D055F3DB5D060000411120712071022A080701030003990202A09976D7E9E5390B640FB3D364103DCD668364B3562CD692C1623417",
++			{
++				NULL,
++				"A09976D7E9E5390B640FB3D364103DCD668364B3562CD692C1623417",
++				"553",
++				STR_ENCODING_7BIT,
++				"A09976D7E9E5390B640FB3D364103DCD668364B3562CD692C1623417",
++				STR_ENCODING_7BIT_HEX_PAD_5,
++			}
++		},
+ 	};
+ 
+ 	unsigned idx = 0;
+@@ -223,6 +263,8 @@
+ 	char * input;
+ 	struct result result;
+ 	char oa[200];
++	char buffer_res[256];
++	char buffer_dec[256];
+ 	const char * msg;
+ 
+ 	result.oa = oa;
+@@ -230,15 +272,15 @@
+ 		result.str = input = strdup(cases[idx].input);
+ 		fprintf(stderr, "%s(\"%s\")...", "at_parse_cmgr", input);
+ 		result.res = at_parse_cmgr(&result.str, strlen(result.str), result.oa, sizeof(oa), &result.oa_enc, &result.msg, &result.msg_enc);
+-		if( ((result.res == NULL && result.res == cases[idx].result.res) || strcmp(result.res, cases[idx].result.res) == 0)
++		if( ((result.res == NULL && result.res == cases[idx].result.res) || test_strcmp(result.res, cases[idx].result.res) == 0)
+ 			&&
+-		   strcmp(result.str, cases[idx].result.str) == 0
++		   test_strcmp(result.str, cases[idx].result.str) == 0
+ 			&&
+-		   strcmp(result.oa, cases[idx].result.oa) == 0
++		   test_strcmp(result.oa, cases[idx].result.oa) == 0
+ 			&&
+ 		   result.oa_enc == cases[idx].result.oa_enc
+ 			&&
+-		   strcmp(result.msg, cases[idx].result.msg) == 0
++		   test_strcmp(result.msg, cases[idx].result.msg) == 0
+ 			&&
+ 		   result.msg_enc == cases[idx].result.msg_enc
+ 			) {
+@@ -248,7 +290,11 @@
+ 			msg = "FAIL";
+ 			faults++;
+ 		}
+-		fprintf(stderr, " = '%s' ('%s','%s',%d,'%s',%d)\t%s\n", result.res, result.str, result.oa, result.oa_enc, result.msg, result.msg_enc, msg);
++		memset(buffer_res, 0, sizeof(buffer_res));
++		memset(buffer_dec, 0, sizeof(buffer_dec));
++		str_recode(RECODE_DECODE, result.msg_enc, result.msg, strlen(result.msg), buffer_res, sizeof(buffer_res));
++		str_recode(RECODE_DECODE, cases[idx].result.msg_enc, cases[idx].result.msg, strlen(cases[idx].result.msg), buffer_dec, sizeof(buffer_dec));
++		fprintf(stderr, " = '%s' ('%s','%s',%d,'%s',%d,'%s','%s')\t%s\n", result.res, result.str, result.oa, result.oa_enc, result.msg, result.msg_enc, buffer_res, buffer_dec, msg);
+ 		free(input);
+ 	}
+ 	fprintf(stderr, "\n");
+@@ -286,7 +332,7 @@
+ 			&&
+ 		   result.dcs == cases[idx].result.dcs
+ 			&&
+-		   strcmp(result.cusd, cases[idx].result.cusd) == 0
++		   test_strcmp(result.cusd, cases[idx].result.cusd) == 0
+ 			) {
+ 			msg = "OK";
+ 			ok++;
+@@ -369,7 +415,7 @@
+ 			&&
+ 		   result.mpty == cases[idx].result.mpty
+ 			&&
+-		   strcmp(result.number, cases[idx].result.number) == 0
++		   test_strcmp(result.number, cases[idx].result.number) == 0
+ 			&&
+ 		   result.toa == cases[idx].result.toa
+ 			) {
+@@ -409,4 +455,4 @@
+ 	
+ 	fprintf(stderr, "done %d tests: %d OK %d FAILS\n", ok + faults, ok, faults);
+ 	return 0;
+-}
+\ No newline at end of file
++}
